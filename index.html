@@ -1,0 +1,100 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="description" content="A private, browser-based text cleaner for documents, notes, and copied web content." />
+    <title>TidyText — Clean copied text in seconds</title>
+    <link rel="icon" href="./favicon.svg" type="image/svg+xml" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Manrope:wght@600;700;800&display=swap" rel="stylesheet" />
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <div class="app-shell">
+      <header class="site-header">
+        <a class="brand" href="#" aria-label="TidyText home">
+          <span class="brand-mark"><i></i><i></i><i></i></span>
+          <span>TidyText</span>
+        </a>
+        <div class="header-note"><span></span> Private by design · runs in your browser</div>
+        <a class="github-link" href="https://github.com/LalaGa-1119/tidytext-office-cleaner" target="_blank" rel="noreferrer">View on GitHub ↗</a>
+      </header>
+
+      <main>
+        <section class="hero">
+          <div>
+            <span class="eyebrow">A SMALL TOOL FOR BETTER WRITING</span>
+            <h1>Turn messy copied text<br />into something <em>clean.</em></h1>
+          </div>
+          <p>Remove broken spacing, tracking links, odd quotation marks, and inconsistent lists without sending your text anywhere.</p>
+        </section>
+
+        <section class="workspace" aria-label="Text cleaning workspace">
+          <div class="workspace-topbar">
+            <div class="presets" role="group" aria-label="Cleaning presets">
+              <span>Preset</span>
+              <button class="preset active" data-preset="balanced" type="button">Balanced</button>
+              <button class="preset" data-preset="web" type="button">Web copy</button>
+              <button class="preset" data-preset="notes" type="button">Meeting notes</button>
+              <button class="preset" data-preset="links" type="button">Link cleanup</button>
+            </div>
+            <button class="options-trigger" id="optionsTrigger" type="button" aria-expanded="false">Cleaning options <span>6 on</span>⌄</button>
+          </div>
+
+          <div class="options-panel" id="optionsPanel" hidden>
+            <label><input type="checkbox" data-option="normalizeWhitespace" checked /> Normalize spacing</label>
+            <label><input type="checkbox" data-option="straightenQuotes" checked /> Straighten quotes</label>
+            <label><input type="checkbox" data-option="cleanUrls" checked /> Remove link trackers</label>
+            <label><input type="checkbox" data-option="normalizeBullets" checked /> Fix bullet lists</label>
+            <label><input type="checkbox" data-option="stripEmoji" checked /> Remove emoji</label>
+            <label><input type="checkbox" data-option="htmlToMarkdown" checked /> HTML to Markdown</label>
+          </div>
+
+          <div class="editors">
+            <article class="editor-card">
+              <header><div><span>01</span><strong>Original text</strong></div><button id="sampleButton" type="button">Try an example</button></header>
+              <textarea id="inputText" spellcheck="true" aria-label="Original text" placeholder="Paste text from a website, document, email, or chat…"></textarea>
+              <footer><span id="inputStats">0 words · 0 characters</span><button id="clearButton" type="button">Clear</button></footer>
+            </article>
+
+            <article class="editor-card output-card">
+              <header><div><span>02</span><strong>Clean result</strong></div><span class="status" id="resultStatus">Ready</span></header>
+              <textarea id="outputText" readonly aria-label="Cleaned text" placeholder="Your cleaned text will appear here…"></textarea>
+              <footer><span id="outputStats">0 words · 0 characters</span><span id="savedStats">0 characters removed</span></footer>
+            </article>
+          </div>
+
+          <div class="actionbar">
+            <div class="case-tools" role="group" aria-label="Text case tools">
+              <span>Case</span>
+              <button data-case="sentence" type="button">Sentence</button>
+              <button data-case="title" type="button">Title</button>
+              <button data-case="upper" type="button">UPPER</button>
+              <button data-case="lower" type="button">lower</button>
+            </div>
+            <div class="primary-actions">
+              <button class="download-button" id="downloadButton" type="button">↓ Download .txt</button>
+              <button class="clean-button" id="cleanButton" type="button">Clean text <kbd>⌘ ↵</kbd></button>
+              <button class="copy-button" id="copyButton" type="button">Copy result</button>
+            </div>
+          </div>
+        </section>
+
+        <section class="benefits" aria-label="Product benefits">
+          <article><span>01</span><div><strong>Nothing gets uploaded</strong><p>All cleanup happens locally in your browser.</p></div></article>
+          <article><span>02</span><div><strong>Made for real office work</strong><p>Useful for reports, meeting notes, emails, and research.</p></div></article>
+          <article><span>03</span><div><strong>Zero setup required</strong><p>No account, installation, dependency, or API key.</p></div></article>
+        </section>
+      </main>
+
+      <footer class="site-footer">
+        <span>Designed and adapted by Lili Gao · 2026</span>
+        <span>Based on the MIT-licensed Smart Clipboard by Rishi.</span>
+      </footer>
+    </div>
+    <div class="toast" id="toast" role="status" aria-live="polite"></div>
+    <script type="module" src="./src/app.js"></script>
+  </body>
+</html>
