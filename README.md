@@ -34,10 +34,6 @@ npm test
 TidyText has no backend, analytics, cookies, account system, or API request. Text
 never leaves the browser.
 
-## Attribution
-
-This project is an expanded adaptation of [Smart Clipboard by Rishi](https://gist.github.com/byrishi/c53c3fcbd6f2e071d01ec6fba372a7b0), released under the MIT License. See [NOTICE.md](./NOTICE.md) for details.
-
 ## License
 
 MIT
