@@ -1,5 +1,27 @@
-const TRACKING_PARAMS = new Set([
-  "fbclid", "gclid", "dclid", "msclkid", "yclid", "mc_cid", "mc_eid", "igshid", "ref_src"
+const URL_PATTERN = /https?:\/\/[^\s<>()\[\]{}"']+/giu;
+const EMOJI_PATTERN = /[\p{Extended_Pictographic}\uFE0F]/gu;
+const WORD_PATTERN = /\b[\p{L}\p{N}][\p{L}\p{N}'’-]*\b/gu;
+
+const TRACKER_NAMES = new Set([
+  "dclid",
+  "fbclid",
+  "gclid",
+  "igshid",
+  "mc_cid",
+  "mc_eid",
+  "msclkid",
+  "ref_src",
+  "yclid"
+]);
+
+const TYPOGRAPHY_REPLACEMENTS = new Map([
+  ["“", '"'], ["”", '"'], ["„", '"'],
+  ["‘", "'"], ["’", "'"], ["‚", "'"],
+  ["–", "-"], ["—", "-"], ["…", "..."]
+]);
+
+const SMALL_TITLE_WORDS = new Set([
+  "a", "an", "and", "as", "at", "but", "by", "for", "in", "nor", "of", "on", "or", "the", "to"
 ]);
 
 export const DEFAULT_OPTIONS = Object.freeze({
@@ -11,94 +33,213 @@ export const DEFAULT_OPTIONS = Object.freeze({
   htmlToMarkdown: true
 });
 
-function decodeBasicEntities(value) {
-  return value
-    .replace(/&nbsp;/gi, " ")
-    .replace(/&amp;/gi, "&")
-    .replace(/&lt;/gi, "<")
-    .replace(/&gt;/gi, ">")
-    .replace(/&quot;/gi, '"')
-    .replace(/&#39;/gi, "'");
+function decodeEntity(entity) {
+  const named = {
+    "&amp;": "&",
+    "&gt;": ">",
+    "&lt;": "<",
+    "&nbsp;": " ",
+    "&quot;": '"',
+    "&apos;": "'"
+  };
+
+  const known = named[entity.toLowerCase()];
+  if (known !== undefined) return known;
+
+  const numeric = entity.match(/^&#(x?[0-9a-f]+);$/i);
+  if (!numeric) return entity;
+
+  const hexadecimal = numeric[1][0].toLowerCase() === "x";
+  const digits = hexadecimal ? numeric[1].slice(1) : numeric[1];
+  const codePoint = Number.parseInt(digits, hexadecimal ? 16 : 10);
+  return Number.isFinite(codePoint) ? String.fromCodePoint(codePoint) : entity;
 }
 
-export function htmlToMarkdown(value) {
-  return decodeBasicEntities(value)
-    .replace(/<br\s*\/?\s*>/gi, "\n")
-    .replace(/<h([1-6])[^>]*>([\s\S]*?)<\/h\1>/gi, (_, level, text) => `${"#".repeat(Number(level))} ${text.trim()}\n\n`)
-    .replace(/<(strong|b)[^>]*>([\s\S]*?)<\/\1>/gi, "**$2**")
-    .replace(/<(em|i)[^>]*>([\s\S]*?)<\/\1>/gi, "_$2_")
-    .replace(/<a[^>]*href=["']([^"']+)["'][^>]*>([\s\S]*?)<\/a>/gi, "[$2]($1)")
-    .replace(/<li[^>]*>([\s\S]*?)<\/li>/gi, "- $1\n")
-    .replace(/<p[^>]*>([\s\S]*?)<\/p>/gi, "$1\n\n")
-    .replace(/<[^>]+>/g, "");
+function decodeEntities(text) {
+  return text.replace(/&(?:amp|gt|lt|nbsp|quot|apos|#\d+|#x[0-9a-f]+);/gi, decodeEntity);
 }
 
-export function removeTrackingParameters(value) {
-  return value.replace(/https?:\/\/[^\s<>()\[\]{}"']+/gi, rawUrl => {
-    const trailing = rawUrl.match(/[.,!?;:]+$/)?.[0] ?? "";
-    const urlText = trailing ? rawUrl.slice(0, -trailing.length) : rawUrl;
-    try {
-      const url = new URL(urlText);
-      [...url.searchParams.keys()].forEach(key => {
-        if (key.toLowerCase().startsWith("utm_") || TRACKING_PARAMS.has(key.toLowerCase())) url.searchParams.delete(key);
-      });
-      return `${url.toString().replace(/\?$/, "")}${trailing}`;
-    } catch {
-      return rawUrl;
+function parseTag(token) {
+  const match = token.match(/^<\s*(\/?)\s*([a-z][\w-]*)([^>]*)>$/i);
+  if (!match) return null;
+  return {
+    closing: match[1] === "/",
+    name: match[2].toLowerCase(),
+    attributes: match[3]
+  };
+}
+
+function readAttribute(attributes, name) {
+  const pattern = new RegExp(`(?:^|\\s)${name}\\s*=\\s*(?:"([^"]*)"|'([^']*)'|([^\\s>]+))`, "i");
+  const match = attributes.match(pattern);
+  return match ? (match[1] ?? match[2] ?? match[3] ?? "") : "";
+}
+
+function renderTag(tag, linkStack) {
+  if (tag.name === "br") return "\n";
+  if (tag.name === "p") return tag.closing ? "\n\n" : "";
+  if (tag.name === "li") return tag.closing ? "\n" : "- ";
+  if (tag.name === "strong" || tag.name === "b") return "**";
+  if (tag.name === "em" || tag.name === "i") return "_";
+
+  if (/^h[1-6]$/.test(tag.name)) {
+    return tag.closing ? "\n\n" : `${"#".repeat(Number(tag.name[1]))} `;
+  }
+
+  if (tag.name === "a") {
+    if (!tag.closing) {
+      linkStack.push(readAttribute(tag.attributes, "href"));
+      return "[";
     }
+    return `](${linkStack.pop() ?? ""})`;
+  }
+
+  return "";
+}
+
+export function htmlToMarkdown(source) {
+  const text = String(source ?? "");
+  const links = [];
+  let markdown = "";
+  let cursor = 0;
+
+  for (const match of text.matchAll(/<[^>]*>/g)) {
+    markdown += decodeEntities(text.slice(cursor, match.index));
+    const tag = parseTag(match[0]);
+    if (tag) markdown += renderTag(tag, links);
+    cursor = match.index + match[0].length;
+  }
+
+  markdown += decodeEntities(text.slice(cursor));
+  return markdown;
+}
+
+function splitTrailingPunctuation(candidate) {
+  const match = candidate.match(/[.,!?;:]+$/u);
+  if (!match) return [candidate, ""];
+  return [candidate.slice(0, -match[0].length), match[0]];
+}
+
+function isTrackingParameter(name) {
+  const normalized = name.toLowerCase();
+  return normalized.startsWith("utm_") || TRACKER_NAMES.has(normalized);
+}
+
+function cleanSingleUrl(candidate) {
+  const [address, punctuation] = splitTrailingPunctuation(candidate);
+
+  try {
+    const parsed = new URL(address);
+    const retained = [...parsed.searchParams].filter(([name]) => !isTrackingParameter(name));
+    parsed.search = "";
+    for (const [name, value] of retained) parsed.searchParams.append(name, value);
+    return `${parsed.href.replace(/\?$/, "")}${punctuation}`;
+  } catch {
+    return candidate;
+  }
+}
+
+export function removeTrackingParameters(source) {
+  return String(source ?? "").replace(URL_PATTERN, cleanSingleUrl);
+}
+
+function standardizeTypography(source) {
+  let result = "";
+  for (const character of source) result += TYPOGRAPHY_REPLACEMENTS.get(character) ?? character;
+  return result;
+}
+
+function standardizeBullets(source) {
+  return source
+    .split("\n")
+    .map(line => line.replace(/^\s*(?:[•●◦▪‣*-])\s+/, "- "))
+    .join("\n");
+}
+
+function tidySpacing(source) {
+  const lines = source.replace(/\r\n?/g, "\n").split("\n");
+  const tidyLines = lines.map(line => line
+    .replace(/[\t\f\v ]+/g, " ")
+    .replace(/\s+([,.;:!?])/g, "$1")
+    .trim()
+  );
+
+  const result = [];
+  for (const line of tidyLines) {
+    if (line || result.at(-1) !== "") result.push(line);
+  }
+  return result.join("\n").trim();
+}
+
+function removeEmoji(source) {
+  return source.replace(EMOJI_PATTERN, "").replace(/ {2,}/g, " ");
+}
+
+export function cleanText(input, options = {}) {
+  if (typeof input !== "string" || input === "") return "";
+
+  const enabled = { ...DEFAULT_OPTIONS, ...options };
+  const stages = [
+    ["htmlToMarkdown", htmlToMarkdown],
+    ["cleanUrls", removeTrackingParameters],
+    ["normalizeBullets", standardizeBullets],
+    ["straightenQuotes", standardizeTypography],
+    ["stripEmoji", removeEmoji],
+    ["normalizeWhitespace", tidySpacing]
+  ];
+
+  const result = stages.reduce(
+    (text, [option, transform]) => enabled[option] ? transform(text) : text,
+    input
+  );
+  return result.trim();
+}
+
+function titleCase(source) {
+  let wordIndex = 0;
+  return source.replace(WORD_PATTERN, word => {
+    const normalized = word.toLocaleLowerCase();
+    const keepLowercase = wordIndex > 0 && SMALL_TITLE_WORDS.has(normalized);
+    wordIndex += 1;
+    return keepLowercase
+      ? normalized
+      : normalized.charAt(0).toLocaleUpperCase() + normalized.slice(1);
   });
 }
 
-function normalizeWhitespace(value) {
-  return value
-    .replace(/\r\n?/g, "\n")
-    .replace(/[\t\f\v ]+/g, " ")
-    .replace(/ *\n */g, "\n")
-    .replace(/\n{3,}/g, "\n\n")
-    .replace(/ +([,.;:!?])/g, "$1")
-    .trim();
-}
+function sentenceCase(source) {
+  let capitalizeNext = true;
+  let result = "";
 
-export function cleanText(input, options = DEFAULT_OPTIONS) {
-  if (typeof input !== "string" || input.length === 0) return "";
-  const config = { ...DEFAULT_OPTIONS, ...options };
-  let text = input;
-
-  if (config.htmlToMarkdown) text = htmlToMarkdown(text);
-  if (config.cleanUrls) text = removeTrackingParameters(text);
-  if (config.normalizeBullets) text = text.replace(/^[\t ]*(?:[•●◦▪‣]|[-*])[\t ]+/gm, "- ");
-  if (config.straightenQuotes) {
-    text = text.replace(/[“”„]/g, '"').replace(/[‘’‚]/g, "'").replace(/[–—]/g, "-").replace(/…/g, "...");
+  for (const character of source.toLocaleLowerCase()) {
+    if (capitalizeNext && /\p{L}/u.test(character)) {
+      result += character.toLocaleUpperCase();
+      capitalizeNext = false;
+      continue;
+    }
+    result += character;
+    if (/[.!?\n]/u.test(character)) capitalizeNext = true;
   }
-  if (config.stripEmoji) {
-    text = text.replace(/[\p{Extended_Pictographic}\uFE0F]/gu, "").replace(/ {2,}/g, " ");
-  }
-  if (config.normalizeWhitespace) text = normalizeWhitespace(text);
-  return text.trim();
+  return result;
 }
 
 export function changeCase(value, mode) {
-  if (!value) return "";
-  if (mode === "upper") return value.toUpperCase();
-  if (mode === "lower") return value.toLowerCase();
-  if (mode === "title") {
-    const minor = new Set(["a", "an", "and", "as", "at", "but", "by", "for", "in", "nor", "of", "on", "or", "the", "to"]);
-    return value.replace(/\b[\p{L}\p{N}][\p{L}\p{N}'-]*\b/gu, (word, offset) => {
-      const lower = word.toLowerCase();
-      return offset > 0 && minor.has(lower) ? lower : lower.charAt(0).toUpperCase() + lower.slice(1);
-    });
+  const text = String(value ?? "");
+  switch (mode) {
+    case "upper": return text.toLocaleUpperCase();
+    case "lower": return text.toLocaleLowerCase();
+    case "title": return titleCase(text);
+    case "sentence": return sentenceCase(text);
+    default: return text;
   }
-  if (mode === "sentence") {
-    return value.toLowerCase().replace(/(^|[.!?]\s+|\n+)([a-z])/g, (_, prefix, letter) => prefix + letter.toUpperCase());
-  }
-  return value;
 }
 
 export function getStats(value) {
-  const trimmed = value.trim();
+  const text = String(value ?? "");
+  const content = text.trim();
   return {
-    words: trimmed ? trimmed.split(/\s+/u).length : 0,
-    characters: value.length,
-    links: value.match(/https?:\/\/\S+/g)?.length ?? 0
+    words: content === "" ? 0 : content.split(/\s+/u).length,
+    characters: text.length,
+    links: [...text.matchAll(/https?:\/\/\S+/giu)].length
   };
 }

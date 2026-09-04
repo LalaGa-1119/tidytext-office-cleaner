@@ -1,21 +1,21 @@
 import { DEFAULT_OPTIONS, changeCase, cleanText, getStats } from "./cleaner.js";
 
-const input = document.querySelector("#inputText");
-const output = document.querySelector("#outputText");
-const inputStats = document.querySelector("#inputStats");
-const outputStats = document.querySelector("#outputStats");
-const savedStats = document.querySelector("#savedStats");
-const status = document.querySelector("#resultStatus");
-const toast = document.querySelector("#toast");
+const byId = id => document.getElementById(id);
+const all = selector => [...document.querySelectorAll(selector)];
 
-const PRESETS = {
-  balanced: { ...DEFAULT_OPTIONS },
-  web: { ...DEFAULT_OPTIONS, stripEmoji: false },
-  notes: { ...DEFAULT_OPTIONS, htmlToMarkdown: false, cleanUrls: false },
-  links: { ...DEFAULT_OPTIONS, normalizeBullets: false, stripEmoji: false, htmlToMarkdown: false }
+const elements = {
+  input: byId("inputText"),
+  output: byId("outputText"),
+  inputStats: byId("inputStats"),
+  outputStats: byId("outputStats"),
+  savedStats: byId("savedStats"),
+  resultStatus: byId("resultStatus"),
+  toast: byId("toast"),
+  optionsPanel: byId("optionsPanel"),
+  optionsTrigger: byId("optionsTrigger")
 };
 
-const SAMPLE = `<h2>Weekly project update ✨</h2>
+const EXAMPLE_TEXT = `<h2>Weekly project update ✨</h2>
 <p>We   finished the first prototype and shared it with the team.</p>
 
 • Review the feedback
@@ -26,85 +26,151 @@ Read more: https://example.com/project?utm_source=newsletter&utm_campaign=weekly
 
 “Keep the report short,” the manager said.`;
 
-function currentOptions() {
-  return [...document.querySelectorAll("[data-option]")].reduce((result, checkbox) => {
-    result[checkbox.dataset.option] = checkbox.checked;
-    return result;
-  }, {});
-}
-
-function updateOptionCount() {
-  const count = [...document.querySelectorAll("[data-option]")].filter(item => item.checked).length;
-  document.querySelector("#optionsTrigger span").textContent = `${count} on`;
-}
-
-function updateStats() {
-  const original = getStats(input.value);
-  const cleaned = getStats(output.value);
-  inputStats.textContent = `${original.words} words · ${original.characters} characters`;
-  outputStats.textContent = `${cleaned.words} words · ${cleaned.characters} characters · ${cleaned.links} links`;
-  const removed = Math.max(0, original.characters - cleaned.characters);
-  savedStats.textContent = `${removed} character${removed === 1 ? "" : "s"} removed`;
-}
-
-function runCleaner(showFeedback = false) {
-  output.value = cleanText(input.value, currentOptions());
-  status.textContent = input.value ? "Cleaned" : "Ready";
-  status.classList.toggle("done", Boolean(input.value));
-  updateStats();
-  if (showFeedback) showToast("Text cleaned locally");
-}
-
-function showToast(message) {
-  toast.textContent = message;
-  toast.classList.add("show");
-  window.clearTimeout(showToast.timer);
-  showToast.timer = window.setTimeout(() => toast.classList.remove("show"), 1800);
-}
-
-document.querySelector("#cleanButton").addEventListener("click", () => runCleaner(true));
-document.querySelector("#sampleButton").addEventListener("click", () => { input.value = SAMPLE; runCleaner(); input.focus(); });
-document.querySelector("#clearButton").addEventListener("click", () => { input.value = ""; output.value = ""; runCleaner(); input.focus(); });
-input.addEventListener("input", () => { status.textContent = "Not cleaned"; status.classList.remove("done"); updateStats(); });
-
-document.querySelector("#copyButton").addEventListener("click", async () => {
-  if (!output.value) return showToast("Nothing to copy yet");
-  await navigator.clipboard.writeText(output.value);
-  showToast("Copied to clipboard");
+const PRESETS = Object.freeze({
+  balanced: { ...DEFAULT_OPTIONS },
+  web: { ...DEFAULT_OPTIONS, stripEmoji: false },
+  notes: { ...DEFAULT_OPTIONS, htmlToMarkdown: false, cleanUrls: false },
+  links: { ...DEFAULT_OPTIONS, normalizeBullets: false, stripEmoji: false, htmlToMarkdown: false }
 });
 
-document.querySelector("#downloadButton").addEventListener("click", () => {
-  if (!output.value) return showToast("Nothing to download yet");
-  const link = document.createElement("a");
-  link.href = URL.createObjectURL(new Blob([output.value], { type: "text/plain;charset=utf-8" }));
-  link.download = "tidytext-result.txt";
-  link.click();
-  URL.revokeObjectURL(link.href);
-  showToast("Text file downloaded");
+let toastTimer;
+
+function selectedOptions() {
+  return Object.fromEntries(all("[data-option]").map(control => [control.dataset.option, control.checked]));
+}
+
+function describeStats(text, includeLinks = false) {
+  const stats = getStats(text);
+  const parts = [`${stats.words} words`, `${stats.characters} characters`];
+  if (includeLinks) parts.push(`${stats.links} links`);
+  return parts.join(" · ");
+}
+
+function refreshStats() {
+  elements.inputStats.textContent = describeStats(elements.input.value);
+  elements.outputStats.textContent = describeStats(elements.output.value, true);
+
+  const removed = Math.max(0, elements.input.value.length - elements.output.value.length);
+  elements.savedStats.textContent = `${removed} character${removed === 1 ? "" : "s"} removed`;
+}
+
+function setResultState(cleaned) {
+  elements.resultStatus.textContent = cleaned ? "Cleaned" : "Ready";
+  elements.resultStatus.classList.toggle("done", cleaned);
+}
+
+function notify(message) {
+  elements.toast.textContent = message;
+  elements.toast.classList.add("show");
+  window.clearTimeout(toastTimer);
+  toastTimer = window.setTimeout(() => elements.toast.classList.remove("show"), 1800);
+}
+
+function clean({ announce = false } = {}) {
+  elements.output.value = cleanText(elements.input.value, selectedOptions());
+  setResultState(elements.input.value.length > 0);
+  refreshStats();
+  if (announce) notify("Text cleaned locally");
+}
+
+function syncOptionCount() {
+  const enabledCount = all("[data-option]").filter(control => control.checked).length;
+  const badge = elements.optionsTrigger.querySelector("span");
+  badge.textContent = `${enabledCount} on`;
+}
+
+function activatePreset(name) {
+  const settings = PRESETS[name];
+  if (!settings) return;
+
+  for (const control of all("[data-option]")) {
+    control.checked = Boolean(settings[control.dataset.option]);
+  }
+  for (const button of all("[data-preset]")) {
+    button.classList.toggle("active", button.dataset.preset === name);
+  }
+  syncOptionCount();
+  clean();
+}
+
+async function copyResult() {
+  if (elements.output.value === "") return notify("Nothing to copy yet");
+  try {
+    await navigator.clipboard.writeText(elements.output.value);
+    notify("Copied to clipboard");
+  } catch {
+    notify("Clipboard access was blocked");
+  }
+}
+
+function downloadResult() {
+  if (elements.output.value === "") return notify("Nothing to download yet");
+
+  const blobUrl = URL.createObjectURL(new Blob([elements.output.value], { type: "text/plain;charset=utf-8" }));
+  const anchor = document.createElement("a");
+  anchor.href = blobUrl;
+  anchor.download = "tidytext-result.txt";
+  anchor.click();
+  window.setTimeout(() => URL.revokeObjectURL(blobUrl), 0);
+  notify("Text file downloaded");
+}
+
+byId("cleanButton").addEventListener("click", () => clean({ announce: true }));
+byId("copyButton").addEventListener("click", copyResult);
+byId("downloadButton").addEventListener("click", downloadResult);
+
+byId("sampleButton").addEventListener("click", () => {
+  elements.input.value = EXAMPLE_TEXT;
+  clean();
+  elements.input.focus();
 });
 
-document.querySelector("#optionsTrigger").addEventListener("click", event => {
-  const panel = document.querySelector("#optionsPanel");
-  panel.hidden = !panel.hidden;
-  event.currentTarget.setAttribute("aria-expanded", String(!panel.hidden));
+byId("clearButton").addEventListener("click", () => {
+  elements.input.value = "";
+  elements.output.value = "";
+  setResultState(false);
+  refreshStats();
+  elements.input.focus();
 });
 
-document.querySelectorAll("[data-option]").forEach(item => item.addEventListener("change", () => { updateOptionCount(); runCleaner(); }));
-document.querySelectorAll("[data-preset]").forEach(button => button.addEventListener("click", () => {
-  const preset = PRESETS[button.dataset.preset];
-  document.querySelectorAll("[data-option]").forEach(item => { item.checked = preset[item.dataset.option]; });
-  document.querySelectorAll("[data-preset]").forEach(item => item.classList.toggle("active", item === button));
-  updateOptionCount(); runCleaner();
-}));
+elements.input.addEventListener("input", () => {
+  elements.resultStatus.textContent = "Not cleaned";
+  elements.resultStatus.classList.remove("done");
+  refreshStats();
+});
 
-document.querySelectorAll("[data-case]").forEach(button => button.addEventListener("click", () => {
-  if (!output.value) return showToast("Clean some text first");
-  output.value = changeCase(output.value, button.dataset.case);
-  updateStats(); showToast(`${button.textContent} case applied`);
-}));
+elements.optionsTrigger.addEventListener("click", () => {
+  const willOpen = elements.optionsPanel.hidden;
+  elements.optionsPanel.hidden = !willOpen;
+  elements.optionsTrigger.setAttribute("aria-expanded", String(willOpen));
+});
+
+for (const control of all("[data-option]")) {
+  control.addEventListener("change", () => {
+    syncOptionCount();
+    clean();
+  });
+}
+
+for (const button of all("[data-preset]")) {
+  button.addEventListener("click", () => activatePreset(button.dataset.preset));
+}
+
+for (const button of all("[data-case]")) {
+  button.addEventListener("click", () => {
+    if (elements.output.value === "") return notify("Clean some text first");
+    elements.output.value = changeCase(elements.output.value, button.dataset.case);
+    refreshStats();
+    notify(`${button.textContent} case applied`);
+  });
+}
 
 document.addEventListener("keydown", event => {
-  if ((event.metaKey || event.ctrlKey) && event.key === "Enter") { event.preventDefault(); runCleaner(true); }
+  if ((event.metaKey || event.ctrlKey) && event.key === "Enter") {
+    event.preventDefault();
+    clean({ announce: true });
+  }
 });
 
-updateStats();
+syncOptionCount();
+refreshStats();
